@@ -68,6 +68,13 @@ Add it directly from GitHub:
 forge = { git = "https://github.com/ronakgh97/forge" }
 ```
 
+Or use it locally by cloning the repo and adding a path dependency.
+
+```toml
+[dependencies]
+forge = { path = "../path/to/forge" }
+```
+
 ## Example
 
 Will update this later...

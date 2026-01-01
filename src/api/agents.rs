@@ -233,16 +233,14 @@ pub async fn prompt_stream(
 /// - Does NOT expose intermediate tool or assistant messages.
 /// - Suitable for stateless, one-shot queries.
 /// - If you need full control over history or tools, use [`prompt`] directly.
-pub async fn prompt_with_tools(agent: Agent, mut history: Vec<Message>) -> Result<String> {
+pub async fn prompt_with_tools(agent: Agent, mut history: Vec<Message>, loop_num: usize) -> Result<String> {
     // TODO: Return history?
     let registry = match &agent.tool_registry {
         Some(r) => r,
         None => return Err(anyhow::anyhow!("No tool registry")),
     };
 
-    const MAX_ITERATIONS: usize = 25;
-
-    for _iteration in 0..MAX_ITERATIONS {
+    for _iteration in 0..loop_num {
         let (response, tools_list) = prompt(agent.clone(), history.clone()).await?;
 
         // No tool calls? STOP!!
@@ -296,7 +294,7 @@ pub async fn prompt_with_tools(agent: Agent, mut history: Vec<Message>) -> Resul
 
     Err(anyhow::anyhow!(
         "Max iterations ({}) reached",
-        MAX_ITERATIONS
+        loop_num
     ))
 }
 
@@ -308,15 +306,14 @@ pub async fn prompt_with_tools(agent: Agent, mut history: Vec<Message>) -> Resul
 pub async fn prompt_with_tools_stream(
     agent: Agent,
     mut history: Vec<Message>,
+    loop_num: usize,
 ) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
     let registry = agent
         .tool_registry
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("No tool registry"))?;
 
-    const MAX_ITERATIONS: usize = 25;
-
-    for _iteration in 0..MAX_ITERATIONS {
+    for _iteration in 0..loop_num {
         let (response, tools_list) = prompt(agent.clone(), history.clone()).await?;
 
         // No tool calls? STOP!!
@@ -371,6 +368,6 @@ pub async fn prompt_with_tools_stream(
 
     Err(anyhow::anyhow!(
         "Max iterations ({}) reached",
-        MAX_ITERATIONS
+        loop_num
     ))
 }
