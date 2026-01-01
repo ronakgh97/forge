@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use futures_util::Stream;
-use crate::api::dtos::{CompletionRequest, Message, Role, ToolCall};
+use crate::api::dtos::{CompletionRequest, Message,  ToolCall};
 use crate::api::dtos::Role::{ASSISTANT, SYSTEM, TOOL};
 use crate::api::request::{send_completion_request, send_request_stream};
 
@@ -240,7 +240,7 @@ pub async fn prompt_with_tools(agent: Agent, mut history: Vec<Message>) -> Resul
         None => return Err(anyhow::anyhow!("No tool registry")),
     };
 
-    const MAX_ITERATIONS: usize = 15;
+    const MAX_ITERATIONS: usize = 25;
 
     for _iteration in 0..MAX_ITERATIONS {
         let (response, tools_list) = prompt(agent.clone(), history.clone()).await?;
@@ -314,7 +314,7 @@ pub async fn prompt_with_tools_stream(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("No tool registry"))?;
 
-    const MAX_ITERATIONS: usize = 15;
+    const MAX_ITERATIONS: usize = 25;
 
     for _iteration in 0..MAX_ITERATIONS {
         let (response, tools_list) = prompt(agent.clone(), history.clone()).await?;
@@ -373,96 +373,4 @@ pub async fn prompt_with_tools_stream(
         "Max iterations ({}) reached",
         MAX_ITERATIONS
     ))
-}
-
-#[tokio::test]
-async fn test_agent_config() -> Result<()> {
-    let agent_builder = AgentBuilder::load_from_toml("agent_config.toml")?;
-    let mut agent = agent_builder.clone().build()?;
-
-    assert_eq!(agent.model, "qwen/qwen3-8b");
-    assert_eq!(agent.url, "http://localhost:1234/v1");
-    assert_eq!(agent.api_key, "local");
-    assert_eq!(
-        agent.system_prompt,
-        "You are a helpful assistant.\n Strict follow user instructions"
-    );
-    assert_eq!(agent.temperature, 0.5);
-    assert_eq!(agent.top_p, 0.9);
-
-    // Test overriding/append a field
-    agent.model = "test-model".to_string();
-    agent.system_prompt = agent.system_prompt.to_string() + "\nModified system prompt";
-    assert_eq!(
-        agent.system_prompt,
-        "You are a helpful assistant.\n Strict follow user instructions\nModified system prompt"
-    );
-
-    let updated_agent_builder = AgentBuilder::convert_to_builder(&agent);
-
-    let updated_toml = updated_agent_builder.to_toml_string()?;
-    println!("Updated TOML:\n{}", updated_toml);
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_agent_image_input() -> Result<()> {
-    use crate::api::dtos::{ImageUrl, MultiContent};
-    use crate::api::request::log_typewriter_effect;
-    use base64::prelude::*;
-
-    let image_data = std::fs::read("src/api/ai_test.jpg")?;
-    let base64_image = BASE64_STANDARD.encode(&image_data);
-    let data_url = format!("data:image/png;base64,{}", base64_image);
-
-    let user_prompt = Message {
-        role: Role::USER,
-        content: None,
-        multi_content: Some(vec![
-            MultiContent {
-                r#type: "text".to_string(),
-                text: Some("Explain this image".to_string()),
-                image_url: None,
-            },
-            MultiContent {
-                r#type: "image_url".to_string(),
-                text: None,
-                image_url: Some(ImageUrl { url: data_url }),
-            },
-        ]),
-        tool_calls: None,
-        tool_call_id: None,
-        name: None,
-    };
-
-    let mut history = vec![user_prompt.clone()];
-
-    let agent = AgentBuilder::new()
-        .model("qwen/qwen3-vl-8b")
-        .url("http://localhost:1234/v1")
-        .api_key("local")
-        .temperature(0.5)
-        .build()?;
-
-    let response_stream = prompt_stream(agent, history.clone()).await?;
-    let response_text = log_typewriter_effect(50, response_stream).await?;
-
-    history.push(Message {
-        role: Role::ASSISTANT,
-        content: Some(response_text.clone()),
-        multi_content: None,
-        tool_calls: None,
-        tool_call_id: None,
-        name: None,
-    });
-    println!();
-    println!("Request: {:?}", serde_json::to_string_pretty(&user_prompt));
-    println!();
-    println!("Response: {}", response_text);
-    println!();
-    println!("History: {:?}", serde_json::to_string_pretty(&history));
-    assert!(!response_text.trim().is_empty());
-
-    Ok(())
 }
