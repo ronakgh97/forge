@@ -121,7 +121,7 @@ fn main() {
 
     // Distribute Cards to Players
     let (distributed_cards, remaining) =
-        distribute_cards_to_players(&mut shuffled_deck, 5).unwrap();
+        distribute_cards_to_players(&mut shuffled_deck, 5, 4).unwrap();
 
     dbg!(&distributed_cards);
     let total_distributed: usize = distributed_cards.iter().map(|hand| hand.len()).sum();
@@ -131,9 +131,10 @@ fn main() {
 fn distribute_cards_to_players(
     deck: &mut Vec<Card>,
     cards_per_player: usize,
-) -> Result<([Vec<Card>; 4], Vec<Card>)> {
+    player_count: usize,
+) -> Result<(Vec<Vec<Card>>, Vec<Card>)> {
     // Hardcoded for 3 AI players, 1 Human player
-    let mut players: Vec<Vec<Card>> = vec![Vec::new(); 4];
+    let mut players: Vec<Vec<Card>> = vec![Vec::new(); player_count];
     for player_hand in players.iter_mut() {
         for _ in 0..cards_per_player {
             if let Some(card) = deck.pop() {
@@ -144,12 +145,7 @@ fn distribute_cards_to_players(
         }
     }
     Ok((
-        [
-            players[0].clone(),
-            players[1].clone(),
-            players[2].clone(),
-            players[3].clone(),
-        ],
+        players,
         deck.clone(), // Remaining deck
     ))
 }
