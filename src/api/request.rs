@@ -5,7 +5,7 @@ use eventsource_stream::Eventsource;
 use futures_util::stream::{Stream, StreamExt};
 use reqwest::Client;
 use std::io::{self, Write};
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 pub async fn send_completion_request(
     url: String,
