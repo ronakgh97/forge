@@ -1,12 +1,12 @@
-use std::pin::Pin;
-use crate::api::tools_registry::ToolRegistry;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use anyhow::{anyhow, Result};
-use futures_util::Stream;
-use crate::api::dtos::{CompletionRequest, Message,  ToolCall};
 use crate::api::dtos::Role::{ASSISTANT, SYSTEM, TOOL};
+use crate::api::dtos::{CompletionRequest, Message, ToolCall};
 use crate::api::request::{send_completion_request, send_request_stream};
+use crate::api::tools_registry::ToolRegistry;
+use anyhow::{Result, anyhow};
+use futures_util::Stream;
+use serde::{Deserialize, Serialize};
+use std::pin::Pin;
+use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Agent {
@@ -233,7 +233,11 @@ pub async fn prompt_stream(
 /// - Does NOT expose intermediate tool or assistant messages.
 /// - Suitable for stateless, one-shot queries.
 /// - If you need full control over history or tools, use [`prompt`] directly.
-pub async fn prompt_with_tools(agent: Agent, mut history: Vec<Message>, loop_num: usize) -> Result<String> {
+pub async fn prompt_with_tools(
+    agent: Agent,
+    mut history: Vec<Message>,
+    loop_num: usize,
+) -> Result<String> {
     // TODO: Return history?
     let registry = match &agent.tool_registry {
         Some(r) => r,
@@ -292,10 +296,7 @@ pub async fn prompt_with_tools(agent: Agent, mut history: Vec<Message>, loop_num
         }
     }
 
-    Err(anyhow::anyhow!(
-        "Max iterations ({}) reached",
-        loop_num
-    ))
+    Err(anyhow::anyhow!("Max iterations ({}) reached", loop_num))
 }
 
 /// High-level streaming with automatic tool execution.
@@ -366,8 +367,5 @@ pub async fn prompt_with_tools_stream(
         }
     }
 
-    Err(anyhow::anyhow!(
-        "Max iterations ({}) reached",
-        loop_num
-    ))
+    Err(anyhow::anyhow!("Max iterations ({}) reached", loop_num))
 }
