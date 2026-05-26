@@ -1,9 +1,10 @@
 use crate::api::dtos::Role::{ASSISTANT, SYSTEM, TOOL};
 use crate::api::dtos::{CompletionRequest, Message, ToolCall};
-use crate::api::request::{send_completion_request, send_request_stream};
+use crate::api::request::{send_request, send_request_stream};
 use crate::api::tools_registry::ToolRegistry;
 use anyhow::{Result, anyhow};
 use futures_util::Stream;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -11,13 +12,15 @@ use std::sync::Arc;
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Agent {
     model: String,
-    url: String,
-    api_key: String,
+    pub(crate) url: String,
+    pub(crate) api_key: String,
     system_prompt: String,
     temperature: f32,
     #[serde(skip_serializing, skip_deserializing, default)]
     tool_registry: Option<Arc<ToolRegistry>>,
     top_p: f32,
+    #[serde(skip)]
+    pub(crate) client: Client,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -120,6 +123,7 @@ impl AgentBuilder {
             temperature: self.temperature,
             tool_registry: self.tool_registry,
             top_p: self.top_p,
+            client: Client::new(),
         })
     }
 }
@@ -144,7 +148,7 @@ pub async fn prompt(
     );
 
     let request = CompletionRequest {
-        model: agent.clone().model,
+        model: agent.model.clone(),
         messages: history,
         tools: agent
             .tool_registry
@@ -155,8 +159,7 @@ pub async fn prompt(
         stream: Some(false),
     };
 
-    let response =
-        send_completion_request(agent.url.clone(), agent.api_key.clone(), request).await?;
+    let response = send_request(agent, request).await?;
 
     let get_content = &response
         .choices
@@ -182,13 +185,13 @@ pub async fn prompt(
 pub async fn prompt_stream(
     agent: &Agent,
     history: Vec<Message>,
-) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
+) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send + '_>>> {
     let mut history = history;
     history.insert(
         0,
         Message {
             role: SYSTEM,
-            content: Some(agent.clone().system_prompt),
+            content: Some(agent.system_prompt.clone()),
             multi_content: None,
             tool_calls: None,
             tool_call_id: None,
@@ -197,7 +200,7 @@ pub async fn prompt_stream(
     );
 
     let request = CompletionRequest {
-        model: agent.clone().model,
+        model: agent.model.clone(),
         messages: history,
         tools: agent
             .tool_registry
@@ -208,7 +211,7 @@ pub async fn prompt_stream(
         stream: Some(true),
     };
 
-    let stream = send_request_stream(agent.url.clone(), agent.api_key.clone(), request).await?;
+    let stream = send_request_stream(agent, request).await?;
 
     Ok(Box::pin(stream))
 }
@@ -255,7 +258,7 @@ pub async fn prompt_with_tools(
         // Execute each tool
         for call in calls {
             let tool_name = &call.function.name;
-            let should_callback = registry.check_tool_callback(tool_name)?;
+            let should_callback = registry.check_tool_callback(tool_name).await?;
 
             let args: serde_json::Value = serde_json::from_str(&call.function.arguments)?;
             let result = registry.execute(tool_name, args).await?;
@@ -294,7 +297,7 @@ pub async fn prompt_with_tools_stream(
     agent: &Agent,
     mut history: Vec<Message>,
     max_loop: usize,
-) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
+) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send + '_>>> {
     let registry = agent
         .tool_registry
         .as_ref()
@@ -323,7 +326,7 @@ pub async fn prompt_with_tools_stream(
 
         for call in calls {
             let tool_name = &call.function.name;
-            let should_callback = registry.check_tool_callback(tool_name)?;
+            let should_callback = registry.check_tool_callback(tool_name).await?;
 
             let args: serde_json::Value = serde_json::from_str(&call.function.arguments)?;
             let result = registry.execute(tool_name, args).await?;

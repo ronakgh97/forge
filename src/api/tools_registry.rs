@@ -34,7 +34,17 @@ impl ToolRegistry {
         self.tools.insert(tool.name().to_string(), Arc::new(tool));
     }
 
-    pub fn check_tool_callback(&self, tool_name: &str) -> Result<bool> {
+    pub fn get_tool_definitions(&self) -> Vec<ToolDto> {
+        self.tools
+            .values()
+            .filter_map(|tool| {
+                let desc = tool.description();
+                serde_json::from_value(desc).ok()
+            })
+            .collect()
+    }
+
+    pub async fn check_tool_callback(&self, tool_name: &str) -> Result<bool> {
         match self.tools.get(tool_name) {
             Some(tool) => Ok(tool.tool_callback()),
             None => Err(anyhow!("Tool '{}' not found", tool_name)),
@@ -46,15 +56,5 @@ impl ToolRegistry {
             Some(tool) => tool.execute_tool(args).await,
             None => Err(anyhow!("Tool '{}' not found", tool_name)),
         }
-    }
-
-    pub fn get_tool_definitions(&self) -> Vec<ToolDto> {
-        self.tools
-            .values()
-            .filter_map(|tool| {
-                let desc = tool.description();
-                serde_json::from_value(desc).ok()
-            })
-            .collect()
     }
 }

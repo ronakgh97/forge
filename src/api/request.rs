@@ -1,28 +1,23 @@
+use crate::api::agents::Agent;
 use crate::api::dtos::{CompletionRequest, CompletionResponse, CompletionStreamResponse};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use eventsource_stream::Eventsource;
 use futures_util::stream::{Stream, StreamExt};
-use reqwest::Client;
 use std::io::{self, Write};
 use tokio::time::{Duration, sleep};
 
-pub async fn send_completion_request(
-    url: String,
-    api_key: String,
-    request: CompletionRequest,
-) -> Result<CompletionResponse> {
-    let client = Client::new();
-
-    let response = client
-        .post(format!("{}/chat/completions", url))
-        .header("Authorization", format!("Bearer {}", api_key))
+/// Sends a completion request to the specified URL with the given API key and request body, returns the deserialized completion response
+pub async fn send_request(agent: &Agent, request: CompletionRequest) -> Result<CompletionResponse> {
+    let response = agent
+        .client
+        .post(format!("{}/chat/completions", agent.url))
+        .header("Authorization", format!("Bearer {}", agent.api_key))
         .json(&request)
         .send()
         .await
         .context("failed to send request")?
-        .error_for_status()
-        .context("request returned error status")?;
+        .error_for_status()?;
 
     let completion: CompletionResponse = response
         .json()
@@ -32,50 +27,15 @@ pub async fn send_completion_request(
     Ok(completion)
 }
 
-pub async fn send_request(
-    url: String,
-    api_key: String,
-    request: CompletionRequest,
-) -> Result<String> {
-    let client = Client::new();
-
-    let response = client
-        .post(format!("{}/chat/completions", url))
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&request)
-        .send()
-        .await
-        .context("failed to send request")?
-        .error_for_status()
-        .context("request returned error status")?;
-
-    let completion: CompletionResponse = response
-        .json()
-        .await
-        .context("failed to deserialize completion response")?;
-
-    let answer = completion
-        .choices
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("No choices in response"))?
-        .message
-        .content
-        .clone();
-
-    let content = answer.ok_or_else(|| anyhow::anyhow!("No content in response"))?;
-
-    Ok(content)
-}
-
+/// Sends a completion request and returns a stream of generated content chunks as they arrive, handles SSE streaming and JSON parsing of each chunk
 pub async fn send_request_stream(
-    url: String,
-    api_key: String,
+    agent: &Agent,
     request: CompletionRequest,
 ) -> Result<impl Stream<Item = Result<String>> + Send> {
-    let client = Client::new();
-    let response = client
-        .post(format!("{}/chat/completions", url))
-        .header("Authorization", format!("Bearer {}", api_key))
+    let response = agent
+        .client
+        .post(format!("{}/chat/completions", agent.url))
+        .header("Authorization", format!("Bearer {}", agent.api_key))
         .json(&request)
         .send()
         .await?
@@ -108,9 +68,8 @@ pub async fn send_request_stream(
     Ok(stream)
 }
 
-/// Consumes a stream and prints it with a typewriter effect
-/// Return the accumulated response as a String
-pub async fn log_typewriter_effect(
+/// Takes a stream of text chunks, collects the full text for proper word wrapping, then prints it character by character, returns the full unwrapped text
+pub async fn console_log(
     wrap_len: usize,
     mut stream: impl Stream<Item = Result<String>> + Unpin,
 ) -> Result<String> {
@@ -121,7 +80,7 @@ pub async fn log_typewriter_effect(
     }
 
     // Word wrap the text (trim start to avoid leading blank lines)
-    let wrapped_text = word_wrap(full_text.trim_start(), wrap_len);
+    let wrapped_text = text_wrapping(full_text.trim_start(), wrap_len);
 
     // Print character by character with typewriter effect
     for c in wrapped_text.chars() {
@@ -133,7 +92,7 @@ pub async fn log_typewriter_effect(
     Ok(full_text)
 }
 
-fn word_wrap(text: &str, width: usize) -> String {
+fn text_wrapping(text: &str, width: usize) -> String {
     let mut result = String::new();
     for line in text.lines() {
         // Check if line is empty/blank to preserve blank lines
