@@ -3,7 +3,7 @@ name = "forge"
 version = "0.1.0"
 edition = "2024"
 authors = ["ronakgh97@gmail.com"]
-description = "A Low level, Opinionated, AI-Agent library."
+description = "A Opinionated AI API library."
 license = "MIT"
 repository = "https:/github.com/ronakgh97/forge"
 homepage = "https:/github.com/ronakgh97/forge"
@@ -14,15 +14,14 @@ name = "forge"
 path = "src/lib.rs"
 
 [dependencies]
+tokio = { version = "1.52.3", features = ["full"] }
 async-trait = "0.1.89"
-tokio = { version = "1.49.0", features = ["full"] }
-futures-util = "0.3.31"
+futures-util = "0.3.32"
 eventsource-stream = "0.2.3"
-reqwest = { version = "0.13.1", features = ["json", "stream"] }
-serde = "1.0.228"
-serde_json = "1.0.149"
-colored = "3.0.0"
-anyhow = "1.0.100"
-toml = "0.9.8"
-rand = "0.9.2"
+reqwest = { version = "0.13.4", features = ["json", "stream"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+colored = "3.1.1"
+anyhow = "1.0.102"
+rand = "0.10.1"
 base64 = "0.22.1"

@@ -10,26 +10,26 @@ use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Agent {
-    pub model: String,
-    pub url: String,
-    pub api_key: String,
-    pub system_prompt: String,
-    pub temperature: f32,
+    model: String,
+    url: String,
+    api_key: String,
+    system_prompt: String,
+    temperature: f32,
     #[serde(skip_serializing, skip_deserializing, default)]
-    pub tool_registry: Option<Arc<ToolRegistry>>,
-    pub top_p: f32,
+    tool_registry: Option<Arc<ToolRegistry>>,
+    top_p: f32,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AgentBuilder {
-    pub model: Option<String>,
-    pub url: String,
-    pub api_key: String,
-    pub system_prompt: String,
-    pub temperature: f32,
+    model: Option<String>,
+    url: String,
+    api_key: String,
+    system_prompt: String,
+    temperature: f32,
     #[serde(skip_serializing, skip_deserializing, default)]
-    pub tool_registry: Option<Arc<ToolRegistry>>,
-    pub top_p: f32,
+    tool_registry: Option<Arc<ToolRegistry>>,
+    top_p: f32,
 }
 
 impl Default for AgentBuilder {
@@ -38,8 +38,7 @@ impl Default for AgentBuilder {
             model: None,
             url: "http://localhost:1234/v1".to_string(),
             api_key: "local".to_string(),
-            system_prompt: "You are a helpful assistant.\n Strict follow user instructions"
-                .to_string(),
+            system_prompt: "Strictly follow user instructions!!!".to_string(),
             tool_registry: None,
             temperature: 0.7,
             top_p: 0.9,
@@ -52,14 +51,14 @@ impl AgentBuilder {
         Self::default()
     }
 
-    pub fn load_from_toml(path: &str) -> Result<Self> {
+    pub fn load_from_json(path: &str) -> Result<Self> {
         let config_str = std::fs::read_to_string(path)?;
-        let agent_builder = toml::from_str::<AgentBuilder>(&config_str)?;
+        let agent_builder = serde_json::from_str::<AgentBuilder>(&config_str)?;
         Ok(agent_builder)
     }
 
-    pub fn to_toml_string(&self) -> Result<String> {
-        let toml_str = toml::to_string_pretty(self)?;
+    pub fn to_json_str(&self) -> Result<String> {
+        let toml_str = serde_json::to_string_pretty(self)?;
         Ok(toml_str)
     }
 
@@ -144,12 +143,6 @@ pub async fn prompt(
             name: None,
         },
     );
-
-    // // Add user prompt
-    // history.push(Message {
-    //     role: Role::user,
-    //     content: prompt.to_string(),
-    // });
 
     let request = CompletionRequest {
         model: agent.clone().model,
@@ -244,7 +237,7 @@ pub async fn prompt_with_tools(
         None => return Err(anyhow::anyhow!("No tool registry")),
     };
 
-    for _iteration in 0..loop_num {
+    for _ in 0..loop_num {
         let (response, tools_list) = prompt(agent.clone(), history.clone()).await?;
 
         // No tool calls? STOP!!
