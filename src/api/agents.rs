@@ -74,7 +74,7 @@ impl AgentBuilder {
         }
     }
 
-    pub fn model(mut self, model: impl Into<String>) -> Self {
+    pub fn model(mut self, model: &str) -> Self {
         self.model = Some(model.into());
         self
     }
@@ -124,19 +124,18 @@ impl AgentBuilder {
     }
 }
 
-/// Low level function to send a prompt and get a response from the agent.
+/// Low level function to send a prompt with system prompt both as vec<history> format and response from the agent.
+/// returns response in vec<history> and tool_calls if any
 pub async fn prompt(
-    agent: Agent,
+    agent: &Agent,
     history: Vec<Message>,
 ) -> Result<(String, Option<Vec<ToolCall>>)> {
-    // Add system prompt to the beginning of history for non-repetitive context
-
     let mut history = history;
     history.insert(
         0,
         Message {
             role: SYSTEM,
-            content: Some(agent.clone().system_prompt),
+            content: Some(agent.system_prompt.clone()),
             multi_content: None,
             tool_calls: None,
             tool_call_id: None,
@@ -178,12 +177,12 @@ pub async fn prompt(
     Ok((get_content.clone(), tool_call.clone()))
 }
 
+/// Stream version of [`prompt`].
+/// returns stream of response content only (no intermediate tool calls or assistant messages).
 pub async fn prompt_stream(
-    agent: Agent,
+    agent: &Agent,
     history: Vec<Message>,
 ) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
-    // Add system prompt to the beginning of history for non-repetitive context
-
     let mut history = history;
     history.insert(
         0,
@@ -196,12 +195,6 @@ pub async fn prompt_stream(
             name: None,
         },
     );
-
-    // // Add user prompt
-    // history.push(Message {
-    //     role: Role::user,
-    //     content: prompt.to_string(),
-    // });
 
     let request = CompletionRequest {
         model: agent.clone().model,
@@ -227,9 +220,9 @@ pub async fn prompt_stream(
 /// - Suitable for stateless, one-shot queries.
 /// - If you need full control over history or tools, use [`prompt`] directly.
 pub async fn prompt_with_tools(
-    agent: Agent,
+    agent: &Agent,
     mut history: Vec<Message>,
-    loop_num: usize,
+    max_loop: usize,
 ) -> Result<String> {
     // TODO: Return history?
     let registry = match &agent.tool_registry {
@@ -237,8 +230,8 @@ pub async fn prompt_with_tools(
         None => return Err(anyhow::anyhow!("No tool registry")),
     };
 
-    for _ in 0..loop_num {
-        let (response, tools_list) = prompt(agent.clone(), history.clone()).await?;
+    for _ in 0..max_loop {
+        let (response, tools_list) = prompt(&agent.clone(), history.clone()).await?;
 
         // No tool calls? STOP!!
         if tools_list.is_none() {
@@ -289,7 +282,7 @@ pub async fn prompt_with_tools(
         }
     }
 
-    Err(anyhow::anyhow!("Max iterations ({}) reached", loop_num))
+    Err(anyhow::anyhow!("Max iterations ({}) reached", max_loop))
 }
 
 /// High-level streaming with automatic tool execution.
@@ -298,17 +291,17 @@ pub async fn prompt_with_tools(
 /// - Returns stream of final answer only
 /// - Compatible with [`prompt_with_tools`] design
 pub async fn prompt_with_tools_stream(
-    agent: Agent,
+    agent: &Agent,
     mut history: Vec<Message>,
-    loop_num: usize,
+    max_loop: usize,
 ) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
     let registry = agent
         .tool_registry
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("No tool registry"))?;
 
-    for _iteration in 0..loop_num {
-        let (response, tools_list) = prompt(agent.clone(), history.clone()).await?;
+    for _ in 0..max_loop {
+        let (response, tools_list) = prompt(&agent.clone(), history.clone()).await?;
 
         // No tool calls? STOP!!
         if tools_list.is_none() {
@@ -360,5 +353,5 @@ pub async fn prompt_with_tools_stream(
         }
     }
 
-    Err(anyhow::anyhow!("Max iterations ({}) reached", loop_num))
+    Err(anyhow::anyhow!("Max iterations ({}) reached", max_loop))
 }
