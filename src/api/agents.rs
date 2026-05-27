@@ -65,14 +65,14 @@ impl AgentBuilder {
         Ok(toml_str)
     }
 
-    pub fn convert_to_builder(agent: &Agent) -> AgentBuilder {
+    pub fn convert_to_builder(agent: Agent) -> AgentBuilder {
         AgentBuilder {
-            model: Some(agent.model.clone()),
-            url: agent.url.clone(),
-            api_key: agent.api_key.clone(),
-            system_prompt: agent.system_prompt.clone(),
+            model: Some(agent.model),
+            url: agent.url,
+            api_key: agent.api_key,
+            system_prompt: agent.system_prompt,
             temperature: agent.temperature,
-            tool_registry: agent.tool_registry.clone(),
+            tool_registry: agent.tool_registry,
             top_p: agent.top_p,
         }
     }
@@ -128,8 +128,8 @@ impl AgentBuilder {
     }
 }
 
-/// Low level function to send a prompt with system prompt both as vec<history> format and response from the agent.
-/// returns response in vec<history> and tool_calls if any
+/// Low level function to send a prompt with system prompt both as vec<message> format
+/// and returns response and tool_calls if any
 pub async fn prompt(
     agent: &Agent,
     history: Vec<Message>,
@@ -227,14 +227,13 @@ pub async fn prompt_with_tools(
     mut history: Vec<Message>,
     max_loop: usize,
 ) -> Result<String> {
-    // TODO: Return history?
     let registry = match &agent.tool_registry {
         Some(r) => r,
         None => return Err(anyhow::anyhow!("No tool registry")),
     };
 
     for _ in 0..max_loop {
-        let (response, tools_list) = prompt(&agent.clone(), history.clone()).await?;
+        let (response, tools_list) = prompt(agent, history.clone()).await?;
 
         // No tool calls? STOP!!
         if tools_list.is_none() {
