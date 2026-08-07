@@ -2,7 +2,7 @@ use crate::agents::Agent;
 use crate::dtos::{CompletionRequest, CompletionResponse};
 use anyhow::{Context, Result};
 
-/// Sends a completion request to the specified URL with the given API key and request body, returns the deserialized completion response
+/// Sends a completion request `(Network I/O)` to the specified URL with the given API key and request body, returns the deserialized completion response
 pub(crate) async fn send_network_request(
     agent: &Agent,
     request: CompletionRequest,

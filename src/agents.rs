@@ -27,14 +27,14 @@ pub struct Agent {
 impl Default for Agent {
     /// Default agent configuration, with no tools registered.
     /// * Model: "google/gemma-4-e4b"
-    /// * URL: "http://127.0.0.1:1234"
+    /// * URL: "http://127.0.0.1:1234/v1"
     /// * API Key: "local-key"
     /// * System Prompt: "You are AI assistant, try helping the user using your all capabilities."
-    /// * Temperature: 0.0
+    /// * Temperature: 1.0
     fn default() -> Self {
         Agent {
             model: "google/gemma-4-e4b".to_string(),
-            url: "http://127.0.0.1:1234".to_string(),
+            url: "http://127.0.0.1:1234/v1".to_string(),
             api_key: "local-key".to_string(),
             system_prompt:
                 "You are AI assistant, try helping the user using your all capabilities."
@@ -55,6 +55,7 @@ impl Agent {
         api_key: String,
         system_prompt: String,
         temperature: f32,
+        tool_registry: Option<ToolRegistry>,
     ) -> Self {
         Agent {
             model,
@@ -62,7 +63,7 @@ impl Agent {
             api_key,
             system_prompt,
             temperature: temperature.clamp(0.0, 1.0),
-            tool_registry: None,
+            tool_registry: tool_registry.map(Arc::new),
             client: Default::default(),
             history: vec![],
         }
@@ -80,16 +81,21 @@ impl Agent {
         Ok(json_str)
     }
 
-    /// Add a tool registry to the agent, which allows the agent to call external tools during the conversation.
-    pub fn add_tools(&mut self, registry: ToolRegistry) {
-        self.tool_registry = Some(Arc::new(registry));
+    /// Get conversation history.
+    pub fn get_history(&self) -> &[Message] {
+        &self.history
+    }
+
+    /// Clear conversation history.
+    pub fn clear_history(&mut self) {
+        self.history.clear();
     }
 
     /// Send a simple prompt with no tools, returns the model's text response.
     pub async fn prompt(&mut self, message: &str) -> Result<String> {
         self.history.push(user_message(message));
 
-        let (response, _) = self.send_prompt().await?;
+        let (response, _) = self.send_prompt(false).await?;
 
         self.history.push(Message {
             role: Assistant,
@@ -102,51 +108,49 @@ impl Agent {
         Ok(response)
     }
 
-    /// Run the infamous internal **Loop** `Context -> AI -> tools -> history -> loop (if callback)`,
-    /// returns the final text model response.
-    pub async fn prompt_with_tools(&mut self, message: &str, max_loop: usize) -> Result<String> {
-        if self.tool_registry.is_none() {
-            return Err(anyhow!("No tool registry"));
-        }
+    /// Run the infamous internal **Loop** `Context -> AI -> Tool Calls -> History -> Loop (if tools callback)`,
+    /// returns the final text model response, when agent is done.
+    pub async fn prompt_with_tools(&mut self, message: &str) -> Result<String> {
+        // Get all tools
+        let tools = if let Some(tools_registry) = &self.tool_registry {
+            tools_registry
+        } else {
+            return Err(anyhow!("No tools registered in the agent"));
+        };
 
+        let mut should_continue = false;
+
+        // Add user message first
         self.history.push(user_message(message));
 
-        for i in 0..max_loop {
-            let (response, calls) = self.send_prompt().await?;
+        loop {
+            // Call using user message and tools
+            let (response, calls) = self.send_prompt(true).await?;
 
+            // Receive tool_calls
             let calls = match calls {
                 Some(c) if !c.is_empty() => c,
                 _ => {
+                    // if no tool calls, just add the assistant message and return, agent is done here
                     self.history.push(assistant_message(response.clone(), None));
                     return Ok(response);
                 }
             };
 
-            // Last iteration — can't send tool results back
-            if i == max_loop - 1 {
-                self.history.push(assistant_message(response, Some(calls)));
-                return Err(anyhow!("Max iterations ({}) reached", max_loop));
-            }
-
+            // Add assistant message with tool calls to history
             self.history
                 .push(assistant_message(response, Some(calls.clone())));
 
+            // Iter over all tool_calls and exec them
             for call in calls {
                 let tool_name = &call.function.name;
-                let should_callback = self
-                    .tool_registry
-                    .as_ref()
-                    .unwrap() // Safe: checked above
-                    .check_tool_callback(tool_name)?;
+                let should_callback = tools.check_tool_callback(tool_name)?;
+                should_continue |= should_callback;
 
                 let args: serde_json::Value = serde_json::from_str(&call.function.arguments)?;
-                let result = self
-                    .tool_registry
-                    .as_ref()
-                    .unwrap()
-                    .execute(tool_name, args)
-                    .await?;
+                let result = tools.execute(tool_name, args).await?;
 
+                // Add tool result to history
                 self.history.push(Message {
                     role: Tool,
                     content: Some(result.clone()),
@@ -155,27 +159,22 @@ impl Agent {
                     name: Some(tool_name.clone()),
                 });
 
-                if !should_callback {
-                    return Ok(result);
-                }
+                // if the tool is set to callback,
+                // we will continue the loop and send the prompt again
             }
+
+            if should_continue {
+                continue;
+            }
+
+            // If we reach here, it means all tool calls have been executed
+            // No further callbacks are needed
+            return Ok(String::new());
         }
-
-        Err(anyhow!("Max iterations ({}) reached", max_loop))
     }
 
-    /// Access conversation history.
-    pub fn history(&self) -> &[Message] {
-        &self.history
-    }
-
-    /// Clear conversation history.
-    pub fn clear_history(&mut self) {
-        self.history.clear();
-    }
-
-    /// Build the full message list with system prompt and send to the model.
-    async fn send_prompt(&self) -> Result<(String, Option<Vec<ToolCall>>)> {
+    /// Send the prompt to the model `(Network)`, with or without tools, and return the model's response and any tool calls.
+    async fn send_prompt(&self, include_tools: bool) -> Result<(String, Option<Vec<ToolCall>>)> {
         let mut messages = Vec::with_capacity(1 + self.history.len());
         messages.push(Message {
             role: System,
@@ -186,15 +185,25 @@ impl Agent {
         });
         messages.extend_from_slice(&self.history);
 
-        let request = CompletionRequest {
-            model: self.model.clone(),
-            messages,
-            tools: self
-                .tool_registry
-                .as_ref()
-                .map(|reg| reg.get_tool_definitions()),
-            temperature: self.temperature,
-            stream: Some(false),
+        let request = if include_tools {
+            CompletionRequest {
+                model: self.model.clone(),
+                messages,
+                tools: self
+                    .tool_registry
+                    .as_ref()
+                    .map(|reg| reg.get_tool_definitions()),
+                temperature: self.temperature,
+                stream: Some(false),
+            }
+        } else {
+            CompletionRequest {
+                model: self.model.clone(),
+                messages,
+                tools: None,
+                temperature: self.temperature,
+                stream: Some(false),
+            }
         };
 
         let response = send_network_request(self, request).await?;
@@ -210,6 +219,8 @@ impl Agent {
     }
 }
 
+#[inline(always)]
+/// Helper function to create a user message
 fn user_message(text: &str) -> Message {
     Message {
         role: User,
@@ -220,6 +231,8 @@ fn user_message(text: &str) -> Message {
     }
 }
 
+#[inline(always)]
+/// Helper function to create an assistant message, optionally with tool calls
 fn assistant_message(content: String, tool_calls: Option<Vec<ToolCall>>) -> Message {
     Message {
         role: Assistant,

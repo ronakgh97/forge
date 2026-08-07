@@ -5,26 +5,26 @@ use serde_json::Value;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let mut tool_registry = ToolRegistry::init();
+    tool_registry.register(NumBlender);
+
     let mut agent = Agent::init(
         "google/gemma-4-e4b".to_string(),
         "http://localhost:1234/v1".to_string(),
         "local".to_string(),
         "You are a helpful assistant.".to_string(),
         0.68,
+        Some(tool_registry),
     );
-
-    let mut tool_registry = ToolRegistry::new();
-    tool_registry.register(NumBlender);
-
-    agent.add_tools(tool_registry);
 
     let a = 1234;
     let b = 5678;
-    let prompt = format!("Blend them {a} * {b}");
+    let prompt = format!("Blend them {a}, {b}");
 
-    let response = agent.prompt_with_tools(&prompt, 8).await?;
+    let response = agent.prompt_with_tools(&prompt).await?;
     println!("Response: {}", response);
-    println!("History: {} messages", agent.history().len());
+    println!("Message count: {}", agent.get_history().len());
+    println!("History: {:?}", agent.get_history());
     Ok(())
 }
 

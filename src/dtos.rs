@@ -3,7 +3,7 @@ use serde_json::Value;
 
 /// Main request structure for the /chat/completions endpoint
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CompletionRequest {
+pub(crate) struct CompletionRequest {
     pub model: String,
     pub messages: Vec<Message>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -15,7 +15,7 @@ pub struct CompletionRequest {
 
 /// Main response structure for the /chat/completions endpoint, includes the generated message(s) and metadata
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CompletionResponse {
+pub(crate) struct CompletionResponse {
     pub id: String,
     pub created: u64,
     pub model: String,
@@ -24,7 +24,7 @@ pub struct CompletionResponse {
 
 /// Represents a single choice in the completion response, includes the index of the choice and the final generated message
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CompletionChoice {
+pub(crate) struct CompletionChoice {
     pub index: u32,
     pub message: Message,
 }
@@ -55,7 +55,7 @@ pub enum Role {
 
 /// Represents a tool/function definition included in the request, called by the model
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Tool {
+pub(crate) struct Tool {
     pub r#type: String,
     pub function: FunctionDefinition,
 }
@@ -77,7 +77,7 @@ pub struct FunctionCall {
 
 /// Represents the definition of a function/tool that the model can call, including its name, description, and parameters (as a JSON Schema)
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FunctionDefinition {
+pub(crate) struct FunctionDefinition {
     pub name: String,
     pub description: String,
     pub parameters: Value, // JSON Schema
