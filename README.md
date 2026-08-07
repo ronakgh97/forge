@@ -1,78 +1,90 @@
-# forge
-
-A tiny async library for building AI agent loops (OpenAI/OpenRouter compatible).
-
-```
-AI -> tools -> memory -> loop
-```
+**forge** - A tiny async library for building AI agent loops (OpenAI/OpenRouter compatible).
 
 > NOTE: Experimental, use for local only.
 
-## Usage
+### Usage
 
 ```rust
-use forge::api::agents::AgentBuilder;
-use forge::api::tools_registry::{Tool, ToolRegistry};
-use serde_json::Value;
-use std::sync::Arc;
+use anyhow::Result;
+use forge::Value;
+use forge::agents::Agent;
+use forge::tools_registry::{Tool, ToolRegistry};
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let mut agent = AgentBuilder::new()
-        .url("http://127.0.0.1:1234/v1")
-        .model("google/gemma-4-e4b")
-        .tool_registry(Arc::new({
-            let mut reg = ToolRegistry::new();
-            reg.register(MyTool);
-            reg
-        }))
-        .build()?;
+async fn main() -> Result<()> {
+    let mut tool_registry = ToolRegistry::init();
+    tool_registry.register(NumBlender);
 
-    // Simple prompt
-    let response = agent.prompt("Hello!").await?;
+    let mut agent = Agent::init(
+        "google/gemma-4-e4b".to_string(),
+        "http://localhost:1234/v1".to_string(),
+        "local".to_string(),
+        "You are a helpful assistant.".to_string(),
+        0.68,
+        Some(tool_registry),
+    );
 
-    // Tool loop — agent calls tools, feeds results back, repeats until done
-    let response = agent.prompt_with_tools("What is 2+2? Use your tools.", 8).await?;
+    let a = 1234;
+    let b = 5678;
+    let prompt = format!("Blend them {a}, {b}");
 
-    // Conversation history is automatic
-    println!("{} messages in history", agent.history().len());
-    agent.clear_history();
-
+    let response = agent.prompt_with_tools(&prompt).await?;
+    println!("Response: {}", response);
+    println!("Message count: {}", agent.get_history().len());
+    println!("History: {:?}", agent.get_history());
     Ok(())
 }
 ```
 
-## Implementing a Tool
+### Implementing a Tool
 
 ```rust
-struct MyTool;
+struct NumBlender;
 
 #[async_trait::async_trait]
-impl Tool for MyTool {
-    fn name(&self) -> &str { "my_tool" }
+impl Tool for NumBlender {
+    fn name(&self) -> &str {
+        "blend_tool"
+    }
 
-    fn description(&self) -> serde_json::Value {
+    fn description(&self) -> Value {
         serde_json::json!({
             "type": "function",
             "function": {
                 "name": self.name(),
-                "description": "Does something useful",
+                "description": "Blend two numbers together",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "input": { "type": "string", "description": "The input" }
+                        "a": {
+                            "type": "integer",
+                            "description": "First number",
+                        },
+                        "b": {
+                            "type": "integer",
+                            "description": "Second number",
+                        }
                     },
-                    "required": ["input"]
+                    "required": ["a", "b"]
                 }
             }
         })
     }
 
-    fn tool_callback(&self) -> bool { true } // true = continue loop, false = return result immediately
+    fn tool_callback(&self) -> bool {
+        true // will loop
+    }
 
-    async fn execute_tool(&self, args: serde_json::Value) -> anyhow::Result<String> {
-        let input = args["input"].as_str().unwrap();
-        Ok(format!("Processed: {input}"))
+    async fn execute_tool(&self, args: Value) -> Result<String> {
+        let a = args
+            .get("a")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow::anyhow!("Missing or invalid 'a'"))?;
+        let b = args
+            .get("b")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow::anyhow!("Missing or invalid 'b'"))?;
+        Ok(rand::random_range(a..b).to_string()) // 'blend' two numbers
     }
 }
 ```

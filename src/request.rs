@@ -14,7 +14,8 @@ pub(crate) async fn send_network_request(
         .json(&request)
         .send()
         .await?
-        .error_for_status()?;
+        .error_for_status()
+        .context("API returned an error status")?;
 
     let completion: CompletionResponse = response
         .json()

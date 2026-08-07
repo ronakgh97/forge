@@ -1,7 +1,7 @@
 use anyhow::Result;
+use forge::Value;
 use forge::agents::Agent;
 use forge::tools_registry::{Tool, ToolRegistry};
-use serde_json::Value;
 
 #[tokio::main]
 async fn main() -> Result<()> {

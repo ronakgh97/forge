@@ -85,11 +85,9 @@ pub(crate) struct FunctionDefinition {
 
 #[test]
 fn test_message_content_serialization() -> anyhow::Result<()> {
-    // Simple text content serialization
     let msg_text = Message {
         role: Role::User,
         content: Some("Hello, world!".to_string()),
-        // multi_content: None,
         tool_calls: None,
         tool_call_id: None,
         name: None,
@@ -97,43 +95,6 @@ fn test_message_content_serialization() -> anyhow::Result<()> {
     let json_text = serde_json::to_string(&msg_text)?;
     assert!(json_text.contains(r#""content":"Hello, world!""#));
 
-    // Multi-content with text serialization
-    let _msg_multi_text = Message {
-        role: Role::User,
-        content: None,
-        // multi_content: Some(vec![MultiContent {
-        //     r#type: "text".to_string(),
-        //     text: Some("Describe this image".to_string()),
-        //     image_url: None,
-        // }]),
-        tool_calls: None,
-        tool_call_id: None,
-        name: None,
-    };
-    // let json_multi_text = serde_json::to_string(&msg_multi_text)?;
-    // assert!(json_multi_text.contains(r#""type":"text""#));
-    // assert!(json_multi_text.contains(r#""text":"Describe this image""#));
-
-    // Multi-content with image serialization
-    let msg_multi_image = Message {
-        role: Role::User,
-        content: None,
-        // multi_content: Some(vec![MultiContent {
-        //     r#type: "image_url".to_string(),
-        //     text: None,
-        //     image_url: Some(ImageUrl {
-        //         url: "data:image/png;base64,iVBORw0KG...".to_string(),
-        //     }),
-        // }]),
-        tool_calls: None,
-        tool_call_id: None,
-        name: None,
-    };
-    let _json_multi_image = serde_json::to_string(&msg_multi_image)?;
-    // assert!(json_multi_image.contains(r#""type":"image_url""#));
-    // assert!(json_multi_image.contains(r#""url":"data:image/png;base64,iVBORw0KG...""#));
-
-    // Deserialize API response with simple text content
     let api_response = r#"{
             "role": "assistant",
             "content": "This is the AI response"
@@ -143,17 +104,14 @@ fn test_message_content_serialization() -> anyhow::Result<()> {
         msg_response.content,
         Some("This is the AI response".to_string())
     );
-    // assert!(msg_response.multi_content.is_none());
     assert_eq!(msg_response.role, Role::Assistant);
 
-    // Deserialize user message with simple text
     let user_message = r#"{
             "role": "user",
             "content": "What is the weather?"
         }"#;
     let msg_user: Message = serde_json::from_str(user_message)?;
     assert_eq!(msg_user.content, Some("What is the weather?".to_string()));
-    // assert!(msg_user.multi_content.is_none());
 
     Ok(())
 }

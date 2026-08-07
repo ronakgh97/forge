@@ -108,41 +108,33 @@ impl Agent {
         Ok(response)
     }
 
-    /// Run the infamous internal **Loop** `Context -> AI -> Tool Calls -> History -> Loop (if tools callback)`,
+    /// Run the internal infamous **Loop** `Context -> AI -> Tool Calls -> History -> Loop (if tools callback)`,
     /// returns the final text model response, when agent is done.
     pub async fn prompt_with_tools(&mut self, message: &str) -> Result<String> {
-        // Get all tools
-        let tools = if let Some(tools_registry) = &self.tool_registry {
-            tools_registry
-        } else {
-            return Err(anyhow!("No tools registered in the agent"));
+        let tools = match &self.tool_registry {
+            Some(r) => r,
+            None => return Err(anyhow!("No tools registered in the agent")),
         };
 
-        let mut should_continue = false;
-
-        // Add user message first
         self.history.push(user_message(message));
 
         loop {
-            // Call using user message and tools
             let (response, calls) = self.send_prompt(true).await?;
 
-            // Receive tool_calls
             let calls = match calls {
                 Some(c) if !c.is_empty() => c,
                 _ => {
-                    // if no tool calls, just add the assistant message and return, agent is done here
                     self.history.push(assistant_message(response.clone(), None));
                     return Ok(response);
                 }
             };
 
-            // Add assistant message with tool calls to history
             self.history
                 .push(assistant_message(response, Some(calls.clone())));
 
-            // Iter over all tool_calls and exec them
-            for call in calls {
+            let mut should_continue = false;
+
+            for call in &calls {
                 let tool_name = &call.function.name;
                 let should_callback = tools.check_tool_callback(tool_name)?;
                 should_continue |= should_callback;
@@ -150,26 +142,22 @@ impl Agent {
                 let args: serde_json::Value = serde_json::from_str(&call.function.arguments)?;
                 let result = tools.execute(tool_name, args).await?;
 
-                // Add tool result to history
                 self.history.push(Message {
                     role: Tool,
-                    content: Some(result.clone()),
+                    content: Some(result),
                     tool_calls: None,
-                    tool_call_id: Some(call.id),
+                    tool_call_id: Some(call.id.clone()),
                     name: Some(tool_name.clone()),
                 });
-
-                // if the tool is set to callback,
-                // we will continue the loop and send the prompt again
             }
 
-            if should_continue {
-                continue;
+            // TODO; if for example, Tool has no callbacks, it will defeat that purpose
+            if !should_continue {
+                let (final_response, _) = self.send_prompt(true).await?;
+                self.history
+                    .push(assistant_message(final_response.clone(), None));
+                return Ok(final_response);
             }
-
-            // If we reach here, it means all tool calls have been executed
-            // No further callbacks are needed
-            return Ok(String::new());
         }
     }
 
