@@ -47,7 +47,7 @@ impl ToolRegistry {
     }
 
     /// Executes the tool with the given name and arguments (as a JSON value) and returns some form of result as a string.
-    /// TODO; the return string loop back to agent, when loop, but if there is no loop, you (human) will get whatever this str fn return, I should think of better design
+    /// TODO; the returned str loops back to agent, when loop, but if there is no loop, you (human) will get whatever this str fn return, I should think of better design
     pub(crate) async fn execute(&self, tool_name: &str, args: Value) -> Result<String> {
         match self.tools.get(tool_name) {
             Some(tool) => tool.execute_tool(args).await,

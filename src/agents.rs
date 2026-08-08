@@ -48,6 +48,7 @@ impl Default for Agent {
 }
 
 impl Agent {
+    #[inline]
     /// Fresh init an agent, with all required parameters, and with no tools registered.
     pub fn init(
         model: String,
@@ -69,48 +70,112 @@ impl Agent {
         }
     }
 
+    #[inline]
     /// Load an agent from a JSON string, which contains the agent's configuration (model, url, api_key, system_prompt, temperature).
     pub fn from_json_str(json_str: &str) -> Result<Self> {
         let agent_builder = serde_json::from_str::<Agent>(json_str)?;
         Ok(agent_builder)
     }
 
+    #[inline]
     /// Serialize the agent's configuration (model, url, api_key, system_prompt, temperature) to a JSON string.
     pub fn to_json_str(&self) -> Result<String> {
         let json_str = serde_json::to_string_pretty(self)?;
         Ok(json_str)
     }
 
+    #[inline]
     /// Get conversation history.
     pub fn get_history(&self) -> &[Message] {
         &self.history
     }
 
+    #[inline]
     /// Clear conversation history.
     pub fn clear_history(&mut self) {
         self.history.clear();
     }
 
-    /// Send a simple prompt with no tools, returns the model's text response.
-    pub async fn prompt(&mut self, message: &str) -> Result<String> {
+    /// Prompt the agent with a message, returns the agent's text response and optional reasoning, without using any tools.
+    pub async fn prompt_with_no_tools(
+        &mut self,
+        message: &str,
+    ) -> Result<(String, Option<String>)> {
         self.history.push(user_message(message));
 
-        let (response, _) = self.send_prompt(false).await?;
+        let (response, reasoning, _) = self.send_prompt(false).await?;
 
-        self.history.push(Message {
-            role: Assistant,
-            content: Some(response.clone()),
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-        });
+        self.history
+            .push(assistant_message(response.clone(), reasoning.clone(), None));
 
-        Ok(response)
+        Ok((response, reasoning))
     }
 
-    /// Run the internal infamous **Loop** `Context -> AI -> Tool Calls -> History -> Loop (if tools callback)`,
-    /// returns the final text model response, when agent is done.
-    pub async fn prompt_with_tools(&mut self, message: &str) -> Result<String> {
+    /// Prompt & execute tools once, returns the agent's text response and optional reasoning and optional tool_calls result from [`ToolRegistry::execute`].
+    pub async fn prompt_with_tools_no_loop(
+        &mut self,
+        message: &str,
+    ) -> Result<(String, Option<String>, Option<Vec<String>>)> {
+        // Get all tools available
+        let tools = match &self.tool_registry {
+            Some(r) => r,
+            None => return Err(anyhow!("No tools registered in the agent")),
+        };
+
+        // Add user message before anything
+        self.history.push(user_message(message));
+
+        // Make network request
+        let (response, reasoning, calls) = self.send_prompt(true).await?;
+
+        // Get tools if any
+        let calls = match calls {
+            Some(c) if !c.is_empty() => c,
+            _ => {
+                // Return the response and reasoning if no tools were called
+                self.history
+                    .push(assistant_message(response.clone(), reasoning.clone(), None));
+                return Ok((response, reasoning, None));
+            }
+        };
+
+        // Add the assistant message with tool calls to history
+        self.history.push(assistant_message(
+            response.clone(),
+            reasoning.clone(),
+            Some(calls.clone()),
+        ));
+
+        // Collect all tool responses, and add them to history as well
+        let mut last_result = Vec::with_capacity(calls.len());
+
+        for call in &calls {
+            let tool_name = &call.function.name;
+            let args: serde_json::Value = serde_json::from_str(&call.function.arguments)?;
+            let result = tools.execute(tool_name, args).await?;
+
+            self.history.push(Message {
+                role: Tool,
+                content: Some(result.clone()),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: Some(call.id.clone()),
+                name: Some(tool_name.clone()),
+            });
+
+            last_result.push(result);
+        }
+
+        Ok((response, reasoning, Some(last_result)))
+    }
+
+    /// Run the internal infamous **Loop** `Context -> AI -> Tool Calls -> History -> Loop`,
+    /// returns the final agent's response text and optional reasoning text, when agent is done.
+    pub async fn prompt_with_tools_loop(
+        &mut self,
+        message: &str,
+    ) -> Result<(String, Option<String>)> {
+        // Get tools
         let tools = match &self.tool_registry {
             Some(r) => r,
             None => return Err(anyhow!("No tools registered in the agent")),
@@ -118,61 +183,62 @@ impl Agent {
 
         self.history.push(user_message(message));
 
+        // Loop until we are done, return final model `content` and `reasoning_content` text
         loop {
-            let (response, calls) = self.send_prompt(true).await?;
+            // Call the agent
+            let (response, reasoning, calls) = self.send_prompt(true).await?;
 
             let calls = match calls {
                 Some(c) if !c.is_empty() => c,
                 _ => {
-                    self.history.push(assistant_message(response.clone(), None));
-                    return Ok(response);
+                    // If no tools were called, return the response and reasoning
+                    self.history
+                        .push(assistant_message(response.clone(), reasoning.clone(), None));
+                    return Ok((response, reasoning));
                 }
             };
 
+            // Add the assistant message with tool calls to history
             self.history
-                .push(assistant_message(response, Some(calls.clone())));
+                .push(assistant_message(response, reasoning, Some(calls.clone())));
 
-            let mut should_continue = false;
-
+            // Iter and exec all tools until we are done
             for call in &calls {
                 let tool_name = &call.function.name;
-                let should_callback = tools.check_tool_callback(tool_name)?;
-                should_continue |= should_callback;
-
                 let args: serde_json::Value = serde_json::from_str(&call.function.arguments)?;
                 let result = tools.execute(tool_name, args).await?;
 
                 self.history.push(Message {
                     role: Tool,
                     content: Some(result),
+                    reasoning_content: None,
                     tool_calls: None,
                     tool_call_id: Some(call.id.clone()),
                     name: Some(tool_name.clone()),
                 });
             }
-
-            // TODO; if for example, Tool has no callbacks, it will defeat that purpose
-            if !should_continue {
-                let (final_response, _) = self.send_prompt(true).await?;
-                self.history
-                    .push(assistant_message(final_response.clone(), None));
-                return Ok(final_response);
-            }
+            // Loop again
         }
     }
 
-    /// Send the prompt to the model `(Network)`, with or without tools, and return the model's response and any tool calls.
-    async fn send_prompt(&self, include_tools: bool) -> Result<(String, Option<Vec<ToolCall>>)> {
-        let mut messages = Vec::with_capacity(1 + self.history.len());
+    /// Send the prompt to the model `(Network I/O)`, with or without tools, and return the model's response, reasoning, and any tool calls.
+    async fn send_prompt(
+        &self,
+        include_tools: bool,
+    ) -> Result<(String, Option<String>, Option<Vec<ToolCall>>)> {
+        let mut messages = Vec::with_capacity(1 + self.history.len()); // Necessary Evil
         messages.push(Message {
             role: System,
             content: Some(self.system_prompt.clone()),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
             name: None,
         });
+        // Add the conversation history to the messages
         messages.extend_from_slice(&self.history);
 
+        // Build the request with or without tools
         let request = if include_tools {
             CompletionRequest {
                 model: self.model.clone(),
@@ -194,6 +260,7 @@ impl Agent {
             }
         };
 
+        // Parse and return
         let response = send_network_request(self, request).await?;
         let choice = response
             .choices
@@ -202,17 +269,18 @@ impl Agent {
 
         Ok((
             choice.message.content.clone().unwrap_or_default(),
+            choice.message.reasoning_content.clone(),
             choice.message.tool_calls.clone(),
         ))
     }
 }
 
 #[inline(always)]
-/// Helper function to create a user message
 fn user_message(text: &str) -> Message {
     Message {
         role: User,
         content: Some(text.to_string()),
+        reasoning_content: None,
         tool_calls: None,
         tool_call_id: None,
         name: None,
@@ -220,11 +288,15 @@ fn user_message(text: &str) -> Message {
 }
 
 #[inline(always)]
-/// Helper function to create an assistant message, optionally with tool calls
-fn assistant_message(content: String, tool_calls: Option<Vec<ToolCall>>) -> Message {
+fn assistant_message(
+    content: String,
+    reasoning_content: Option<String>,
+    tool_calls: Option<Vec<ToolCall>>,
+) -> Message {
     Message {
         role: Assistant,
         content: Some(content),
+        reasoning_content,
         tool_calls,
         tool_call_id: None,
         name: None,

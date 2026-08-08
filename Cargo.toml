@@ -1,12 +1,13 @@
 [package]
 name = "forge"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 edition = "2024"
 authors = ["ronakgh97@gmail.com"]
-description = "A Experimental AI loop library."
+description = "An Experimental AI Loop/Network Library."
 license = "MIT"
 repository = "https://github.com/ronakgh97/forge"
 homepage = "https://github.com/ronakgh97/forge"
+readme = "README.md"
 
 [lib]
 name = "forge"

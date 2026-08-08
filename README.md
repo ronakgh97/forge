@@ -2,41 +2,44 @@
 
 > NOTE: Experimental, use for local only.
 
-### Usage
+[Usages](./examples)
+
+### Example
 
 ```rust
-use anyhow::Result;
-use forge::Value;
-use forge::agents::Agent;
-use forge::tools_registry::{Tool, ToolRegistry};
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut tool_registry = ToolRegistry::init();
     tool_registry.register(NumBlender);
+    tool_registry.register(NumGrinder);
 
     let mut agent = Agent::init(
         "google/gemma-4-e4b".to_string(),
         "http://localhost:1234/v1".to_string(),
         "local".to_string(),
-        "You are a helpful assistant.".to_string(),
+        "You are a helpful AI assistant.".to_string(),
         0.68,
         Some(tool_registry),
     );
 
-    let a = 1234;
-    let b = 5678;
-    let prompt = format!("Blend them {a}, {b}");
+    let a = 1234.19;
+    let b = 5678.34;
+    let prompt = format!("Blend and grind them {a}, {b}");
 
-    let response = agent.prompt_with_tools(&prompt).await?;
-    println!("Response: {}", response);
+    let response = agent.prompt_with_tools_no_loop(&prompt).await?;
+    println!("Response text: {}", response.0);
+    println!(
+        "Reasoning text: {}",
+        response.1.unwrap_or("None".to_string())
+    );
+    println!("Tool call: {:?}", response.2.unwrap_or_else(Vec::new));
     println!("Message count: {}", agent.get_history().len());
     println!("History: {:?}", agent.get_history());
     Ok(())
 }
 ```
 
-### Implementing a Tool
+### Tool Impl
 
 ```rust
 struct NumBlender;
@@ -44,7 +47,7 @@ struct NumBlender;
 #[async_trait::async_trait]
 impl Tool for NumBlender {
     fn name(&self) -> &str {
-        "blend_tool"
+        "num_blender"
     }
 
     fn description(&self) -> Value {
@@ -57,11 +60,11 @@ impl Tool for NumBlender {
                     "type": "object",
                     "properties": {
                         "a": {
-                            "type": "integer",
+                            "type": "float",
                             "description": "First number",
                         },
                         "b": {
-                            "type": "integer",
+                            "type": "float",
                             "description": "Second number",
                         }
                     },
@@ -69,10 +72,6 @@ impl Tool for NumBlender {
                 }
             }
         })
-    }
-
-    fn tool_callback(&self) -> bool {
-        true // will loop
     }
 
     async fn execute_tool(&self, args: Value) -> Result<String> {

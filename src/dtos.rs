@@ -29,12 +29,14 @@ pub(crate) struct CompletionChoice {
     pub message: Message,
 }
 
-/// Represents a single message in the conversation, can contain either simple text content or multi-content (text + images)
+/// Represents a single message in the conversation, can contain either simple text content or (TODO; multi-content (text + images))
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Message {
     pub role: Role,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub reasoning_content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -88,12 +90,14 @@ fn test_message_content_serialization() -> anyhow::Result<()> {
     let msg_text = Message {
         role: Role::User,
         content: Some("Hello, world!".to_string()),
+        reasoning_content: None,
         tool_calls: None,
         tool_call_id: None,
         name: None,
     };
     let json_text = serde_json::to_string(&msg_text)?;
     assert!(json_text.contains(r#""content":"Hello, world!""#));
+    assert!(!json_text.contains("reasoning_content"));
 
     let api_response = r#"{
             "role": "assistant",
@@ -105,6 +109,7 @@ fn test_message_content_serialization() -> anyhow::Result<()> {
         Some("This is the AI response".to_string())
     );
     assert_eq!(msg_response.role, Role::Assistant);
+    assert!(msg_response.reasoning_content.is_none());
 
     let user_message = r#"{
             "role": "user",
@@ -112,6 +117,31 @@ fn test_message_content_serialization() -> anyhow::Result<()> {
         }"#;
     let msg_user: Message = serde_json::from_str(user_message)?;
     assert_eq!(msg_user.content, Some("What is the weather?".to_string()));
+
+    Ok(())
+}
+
+#[test]
+fn test_reasoning_content_deserialization() -> anyhow::Result<()> {
+    let api_response = r#"{
+            "role": "assistant",
+            "content": "The answer is 42.",
+            "reasoning_content": "Let me think... the user asked a philosophical question."
+        }"#;
+    let msg: Message = serde_json::from_str(api_response)?;
+    assert_eq!(msg.content, Some("The answer is 42.".to_string()));
+    assert_eq!(
+        msg.reasoning_content,
+        Some("Let me think... the user asked a philosophical question.".to_string())
+    );
+
+    // Without reasoning_content — should default to None
+    let api_response_no_reason = r#"{
+            "role": "assistant",
+            "content": "Hello!"
+        }"#;
+    let msg2: Message = serde_json::from_str(api_response_no_reason)?;
+    assert!(msg2.reasoning_content.is_none());
 
     Ok(())
 }
